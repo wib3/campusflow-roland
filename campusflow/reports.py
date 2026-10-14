@@ -14,14 +14,33 @@ def get_work_queue(tickets):
 
 
 def generate_report(tickets):
-    """Count all tickets, including zero counts for each supported status/priority."""
+    """Return ticket counts and resolution metrics without modifying tickets."""
+    categories = ("Network", "Hardware", "Software", "Other")
     report = {
         "total": 0,
         "by_status": dict.fromkeys(STATUSES, 0),
         "by_priority": dict.fromkeys(PRIORITIES, 0),
+        "by_category": dict.fromkeys(categories, 0),
+        "unresolved": 0,
+        "resolved": 0,
+        "resolution_percentage": 0.0,
     }
+
     for ticket in tickets:
-        report["by_status"][ticket["status"]] += 1
+        status = ticket["status"]
+        report["by_status"][status] += 1
         report["by_priority"][ticket["priority"]] += 1
+        report["by_category"][ticket["category"]] += 1
         report["total"] += 1
+
+        if status == "resolved":
+            report["resolved"] += 1
+        else:
+            report["unresolved"] += 1
+
+    if report["total"]:
+        report["resolution_percentage"] = (
+            report["resolved"] / report["total"]
+        ) * 100
+
     return report
