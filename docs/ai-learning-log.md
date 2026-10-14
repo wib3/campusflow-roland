@@ -176,3 +176,42 @@ AI-generated implementation.
 
 This explanation was drafted by the assistant from the verified implementation;
 it is not attributed as Engineer 2's independently written reflection.
+
+## Engineer 2 — Search, reporting, understanding check, and follow-up notes
+
+### Work completed
+
+I extended the CampusFlow CLI with ticket search and filtering, additional
+reporting metrics, an interactive understanding check, and follow-up notes.
+The search feature supports a title query and optional category, status, and
+priority filters. The report includes ticket breakdowns and resolution
+statistics. The understanding check separates score calculation from the
+interactive questions. Follow-up notes are validated and associated with
+existing tickets.
+
+### Verification evidence
+
+After integrating the follow-up notes module and updating the CLI menu, I ran:
+
+```sh
+python3 -m unittest discover -s tests -q
+git diff --check
+Observed result: 75 tests passed, and `git diff --check` reported no errors.
+The integration was committed as `370db12` (`Integrate ticket follow-up notes`)
+and pushed to `myfork/feature/engineer-2-reporting`.
+
+### My learning reflection — complete in my own words
+
+Before submission, I must be able to explain how the search filters combine,
+how the report calculates its metrics, how the understanding-check scorer works,
+and how notes are validated and saved. I should demonstrate this by tracing the
+relevant functions and explaining at least one test for each feature without
+copying an AI-generated explanation.
+
+### AI assistance and limitations
+
+AI assistance was used to help implement and integrate features and to run
+automated tests. The passing test suite is evidence of automated verification;
+it does not alone prove independent understanding. The learning reflection
+above identifies what I still need to explain myself rather than claiming that
+I have already mastered it.
