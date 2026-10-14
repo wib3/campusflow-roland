@@ -141,6 +141,7 @@ def create_ticket(
         "priority": priority,
         "status": "open",
         "assigned_to": None,
+        "notes": [],
     }
 
     tickets.append(ticket)

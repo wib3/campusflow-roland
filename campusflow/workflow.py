@@ -2,6 +2,7 @@
 
 
 from campusflow.exceptions import InvalidTransitionError, TicketNotFoundError, ValidationError
+from campusflow.validation import can_transition
 
 def get_ticket(tickets, ticket_id):
     """Return the matching ticket; raise TicketNotFoundError for an unknown ID."""

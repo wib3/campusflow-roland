@@ -21,7 +21,7 @@ CampusFlow is a Python CLI helpdesk ticket management system.
 
 ---
 
-## 2. Shared Data Structure: Ticket Schema
+## 2. Shared Data Structure: Ticket Schema (CampusFlow Next)
 
 Each ticket is represented as a Python dictionary:
 ```python
@@ -30,10 +30,17 @@ Each ticket is represented as a Python dictionary:
     "title": "Wi-Fi outage",   # Non-blank string
     "category": "Network",     # Normalized: "Network", "Hardware", "Software", "Other"
     "urgency": "high",         # Normalized: "low", "medium", "high"
-    "affected_users": 15,      # Positive integer (> 0)
+    "affected_users": 15,      # Strictly positive integer (> 0)
     "priority": "critical",    # Calculated: "critical", "high", "medium", "low"
     "status": "open",          # "open", "in_progress", "resolved"
-    "assigned_to": None        # Non-empty string or None
+    "assigned_to": None,       # Non-empty string or None (must be non-empty for in_progress)
+    "notes": [                 # List of structured follow-up note dictionaries
+        {
+            "note_id": "N001", # Sequential per-ticket note ID: "N001", "N002", ...
+            "author": "Ada",   # Non-blank string
+            "message": "text"  # Trimmed string between 5 and 300 characters
+        }
+    ]
 }
 ```
 
@@ -98,14 +105,37 @@ Defines `CampusFlowError`, `ValidationError`, `TicketNotFoundError`, `InvalidTra
   - Returns total count, breakdown by status (`open`, `in_progress`, `resolved`), and breakdown by priority (`critical`, `high`, `medium`, `low`).
   - Gracefully handles empty ticket collections (zero tickets).
 
-### 4.5 Persistence (`campusflow/storage.py`)
+### 4.6 Persistence & Schema Validation (`campusflow/storage.py`)
 * `save_tickets(tickets: list[dict], filepath: str) -> None`
-  - Atomically writes tickets to JSON file.
+  - Validates full ticket schema for every ticket before writing to disk.
+  - Atomically writes tickets to JSON file using temporary file and `os.replace`.
 * `load_tickets(filepath: str) -> list[dict]`
-  - Loads tickets from JSON file.
-  - If file does not exist, returns empty list `[]` (fresh start).
-  - If JSON is malformed/corrupted, raises `StorageError` with clear message without deleting the file.
+  - Loads tickets from JSON file with full collection validation.
+  - Automatically migrates legacy tickets lacking `notes` by initializing `"notes": []`.
+  - Validates required keys, data types, legal enums, priority calculation consistency, and ID uniqueness.
+  - Rejects duplicate ticket IDs, malformed notes, and invalid lifecycle states (e.g. unassigned in_progress) by raising `StorageError`.
+  - Guarantees zero state loss: any failed load raises `StorageError` without modifying caller's in-memory collection.
 
-### 4.6 Testing Isolation
+### 4.7 Centralized Validation & Invariants (`campusflow/validation.py`)
+* `validate_title(title) -> str`: Enforces non-blank string after whitespace trimming.
+* `validate_category(category) -> str`: Normalizes case and ensures category is in `{"Network", "Hardware", "Software", "Other"}`.
+* `validate_urgency(urgency) -> str`: Normalizes case and ensures urgency is in `{"low", "medium", "high"}`.
+* `validate_affected_users(affected_users, strict=True) -> int`: Strictly checks that value is an `int`, not a `bool` (`isinstance(True, int)` is guarded), not a float, not negative, not zero.
+* `can_transition(ticket, target_status) -> bool`: Pure truth-table function evaluating lifecycle transitions without throwing exceptions.
+* `validate_transition(ticket, target_status) -> str`: Enforces lifecycle transitions (`open` -> `in_progress` -> `resolved`; explicit `reopen_ticket` for resolved). Requires staff assignment before moving to `in_progress`.
+* `validate_ticket_dict(ticket, calculate_priority_fn=None) -> None`: Validates complete dictionary structure and verifies that `ticket["priority"]` equals `calculate_priority(...)`.
+
+### 4.8 Follow-up Notes (`campusflow/notes.py`)
+* `next_note_id(ticket: dict) -> str`: Stateless note ID generator deriving next ID (`N001`, `N002`, ...) from existing notes.
+* `validate_note_input(author, message) -> dict`: Ensures non-empty author and message length between 5 and 300 characters.
+* `add_note(tickets, ticket_id, author, message) -> dict`:
+  - Allowed only on `open` or `in_progress` tickets.
+  - Rejects notes on `resolved` tickets with `InvalidTransitionError`.
+  - A rejected note never consumes or increments an ID.
+  - Failed operations preserve existing ticket state completely.
+* `get_ticket_notes(tickets, ticket_id) -> list[dict]`: Returns all notes in sequential ID order.
+
+### 4.9 Testing Isolation
 All business functions accept pure data arguments (`tickets: list[dict]`, strings, ints) and return dicts or raise exceptions. No business logic functions invoke `input()` or `print()`. This allows fast, deterministic automated testing in `unittest`.
+
 

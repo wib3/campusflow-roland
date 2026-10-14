@@ -7,6 +7,7 @@ import sys
 from typing import Any, Dict, List
 
 from campusflow.exceptions import CampusFlowError, StorageError
+from campusflow.notes import add_note, get_ticket_notes
 from campusflow.reports import generate_report, get_work_queue
 from campusflow.storage import load_tickets, save_tickets
 from campusflow.tickets import create_ticket, get_ticket, list_tickets
@@ -18,12 +19,14 @@ DEFAULT_DATA_FILE = "data/tickets.json"
 def display_ticket_summary(ticket: Dict[str, Any]) -> None:
     """Print a one-line summary of a ticket."""
     assigned = ticket.get("assigned_to") or "Unassigned"
+    notes_count = len(ticket.get("notes", []))
     print(
         f"[{ticket['id']}] {ticket['title']} "
         f"| Priority: {ticket['priority'].upper()} "
         f"| Status: {ticket['status']} "
         f"| Assigned: {assigned} "
-        f"| Category: {ticket['category']}"
+        f"| Category: {ticket['category']} "
+        f"| Notes: {notes_count}"
     )
 
 
@@ -38,6 +41,13 @@ def display_ticket_detail(ticket: Dict[str, Any]) -> None:
     print(f"Priority:       {ticket['priority'].upper()}")
     print(f"Status:         {ticket['status']}")
     print(f"Assigned To:    {ticket.get('assigned_to') or 'None (Unassigned)'}")
+    notes = ticket.get("notes", [])
+    if notes:
+        print(f"\nFollow-up Notes ({len(notes)}):")
+        for n in notes:
+            print(f"  * [{n['note_id']}] {n['author']}: {n['message']}")
+    else:
+        print("Follow-up Notes: None")
     print("=" * 48)
 
 
@@ -139,6 +149,35 @@ def handle_generate_report(tickets: List[Dict[str, Any]]) -> None:
         print(f"  * {priority.upper():12s}: {count}")
 
 
+def handle_add_note(tickets: List[Dict[str, Any]], data_path: str) -> None:
+    """Prompt the user and add a structured follow-up note to an active ticket."""
+    print("\n--- Add Follow-up Note ---")
+    ticket_id = input("Enter ticket ID: ").strip()
+    author = input("Enter your name/role (Author): ").strip()
+    message = input("Enter follow-up message (5-300 characters): ").strip()
+    note = add_note(tickets, ticket_id, author, message)
+    save_tickets(tickets, data_path)
+    print(
+        f"\n[Success] Added Note '{note['note_id']}' by '{note['author']}' "
+        f"to Ticket {ticket_id.upper()}."
+    )
+
+
+def handle_view_notes(tickets: List[Dict[str, Any]]) -> None:
+    """View all follow-up notes for a specific ticket."""
+    print("\n--- View Ticket Notes ---")
+    ticket_id = input("Enter ticket ID: ").strip()
+    ticket = get_ticket(tickets, ticket_id)
+    notes = get_ticket_notes(ticket)
+    if not notes:
+        print(f"\nNo follow-up notes found for Ticket {ticket['id']}.")
+        return
+
+    print(f"\nFollow-up Notes for Ticket {ticket['id']} ({len(notes)} note(s)):")
+    for n in notes:
+        print(f"  * [{n['note_id']}] {n['author']}: {n['message']}")
+
+
 def run_menu(tickets: List[Dict[str, Any]], data_path: str) -> None:
     """Main CLI menu interaction loop."""
     menu = """
@@ -153,9 +192,11 @@ def run_menu(tickets: List[Dict[str, Any]], data_path: str) -> None:
 6. Reopen Resolved Ticket (F4)
 7. Open Tickets Awaiting Work (F5 Queue)
 8. Generate Summary Report (F6)
-9. Save and Exit (F7)
+9. Add Follow-up Note (Next)
+10. View Ticket Notes (Next)
+11. Save and Exit (F7)
 ======================================================
-Select an option (1-9): """
+Select an option (1-11): """
 
     while True:
         try:
@@ -176,12 +217,16 @@ Select an option (1-9): """
                 handle_work_queue(tickets)
             elif choice == "8":
                 handle_generate_report(tickets)
-            elif choice in {"9", "exit", "quit", "q"}:
+            elif choice == "9":
+                handle_add_note(tickets, data_path)
+            elif choice == "10":
+                handle_view_notes(tickets)
+            elif choice in {"11", "exit", "quit", "q"}:
                 save_tickets(tickets, data_path)
                 print("\n[CampusFlow] Tickets saved successfully. Goodbye!\n")
                 break
             else:
-                print(f"\n[Warning] Invalid option '{choice}'. Please select a number between 1 and 9.")
+                print(f"\n[Warning] Invalid option '{choice}'. Please select a number between 1 and 11.")
         except CampusFlowError as err:
             print(f"\n[Operation Failed] {err}")
         except (KeyboardInterrupt, EOFError):
