@@ -4,8 +4,13 @@ import unittest
 from campusflow.reports import generate_report, get_work_queue
 
 
-def ticket(ticket_id, priority, status="open"):
-    return {"id": ticket_id, "priority": priority, "status": status}
+def ticket(ticket_id, priority, status="open", category="Software"):
+    return {
+        "id": ticket_id,
+        "priority": priority,
+        "status": status,
+        "category": category,
+    }
 
 
 class ReportsTests(unittest.TestCase):
@@ -39,6 +44,10 @@ class ReportsTests(unittest.TestCase):
             "total": 0,
             "by_status": {"open": 0, "in_progress": 0, "resolved": 0},
             "by_priority": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+            "by_category": {"Network": 0, "Hardware": 0, "Software": 0, "Other": 0},
+            "unresolved": 0,
+            "resolved": 0,
+            "resolution_percentage": 0.0,
         })
 
     def test_report_counts_every_ticket_without_mutation(self):
@@ -49,5 +58,49 @@ class ReportsTests(unittest.TestCase):
             "total": 4,
             "by_status": {"open": 2, "in_progress": 1, "resolved": 1},
             "by_priority": {"critical": 1, "high": 2, "medium": 0, "low": 1},
+            "by_category": {"Network": 0, "Hardware": 0, "Software": 4, "Other": 0},
+            "unresolved": 3,
+            "resolved": 1,
+            "resolution_percentage": 25.0,
         })
         self.assertEqual(tickets, before)
+
+    def test_report_counts_by_category(self):
+        tickets = [
+            ticket("T001", "critical", category="Network"),
+            ticket("T002", "high", category="Hardware"),
+            ticket("T003", "low", category="Network"),
+            ticket("T004", "medium", category="Other"),
+        ]
+
+        report = generate_report(tickets)
+
+        self.assertEqual(report["by_category"], {
+            "Network": 2,
+            "Hardware": 1,
+            "Software": 0,
+            "Other": 1,
+        })
+
+    def test_report_counts_resolved_and_unresolved(self):
+        tickets = [
+            ticket("T001", "critical", "open"),
+            ticket("T002", "high", "in_progress"),
+            ticket("T003", "low", "resolved"),
+        ]
+
+        report = generate_report(tickets)
+
+        self.assertEqual(report["unresolved"], 2)
+        self.assertEqual(report["resolved"], 1)
+
+    def test_report_resolution_percentage_and_empty_dataset(self):
+        tickets = [
+            ticket("T001", "critical", "resolved"),
+            ticket("T002", "high", "open"),
+            ticket("T003", "low", "in_progress"),
+            ticket("T004", "medium", "resolved"),
+        ]
+
+        self.assertEqual(generate_report(tickets)["resolution_percentage"], 50.0)
+        self.assertEqual(generate_report([])["resolution_percentage"], 0.0)

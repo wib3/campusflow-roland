@@ -4,9 +4,11 @@ Entry point for the interactive command-line interface.
 """
 
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from campusflow.exceptions import CampusFlowError, StorageError
+from campusflow.understanding_check import run_understanding_check
+from campusflow.notes import add_note, get_ticket_notes
 from campusflow.reports import generate_report, get_work_queue
 from campusflow.storage import load_tickets, save_tickets
 from campusflow.tickets import create_ticket, get_ticket, list_tickets
@@ -18,12 +20,14 @@ DEFAULT_DATA_FILE = "data/tickets.json"
 def display_ticket_summary(ticket: Dict[str, Any]) -> None:
     """Print a one-line summary of a ticket."""
     assigned = ticket.get("assigned_to") or "Unassigned"
+    notes_count = len(ticket.get("notes", []))
     print(
         f"[{ticket['id']}] {ticket['title']} "
         f"| Priority: {ticket['priority'].upper()} "
         f"| Status: {ticket['status']} "
         f"| Assigned: {assigned} "
-        f"| Category: {ticket['category']}"
+        f"| Category: {ticket['category']} "
+        f"| Notes: {notes_count}"
     )
 
 
@@ -38,6 +42,13 @@ def display_ticket_detail(ticket: Dict[str, Any]) -> None:
     print(f"Priority:       {ticket['priority'].upper()}")
     print(f"Status:         {ticket['status']}")
     print(f"Assigned To:    {ticket.get('assigned_to') or 'None (Unassigned)'}")
+    notes = ticket.get("notes", [])
+    if notes:
+        print(f"\nFollow-up Notes ({len(notes)}):")
+        for n in notes:
+            print(f"  * [{n['note_id']}] {n['author']}: {n['message']}")
+    else:
+        print("Follow-up Notes: None")
     print("=" * 48)
 
 
@@ -125,10 +136,14 @@ def handle_work_queue(tickets: List[Dict[str, Any]]) -> None:
 
 
 def handle_generate_report(tickets: List[Dict[str, Any]]) -> None:
-    """Display overall metrics and breakdown reports."""
+    """Display ticket totals, breakdowns, and resolution metrics."""
     print("\n--- Ticket Metrics & Status Report ---")
     report = generate_report(tickets)
+
     print(f"Total Tickets: {report['total']}")
+    print(f"Unresolved Tickets: {report['unresolved']}")
+    print(f"Resolved Tickets: {report['resolved']}")
+    print(f"Resolution Rate: {report['resolution_percentage']:.1f}%")
 
     print("\nBreakdown by Status:")
     for status, count in report["by_status"].items():
@@ -137,6 +152,89 @@ def handle_generate_report(tickets: List[Dict[str, Any]]) -> None:
     print("\nBreakdown by Priority:")
     for priority, count in report["by_priority"].items():
         print(f"  * {priority.upper():12s}: {count}")
+
+    print("\nBreakdown by Category:")
+    for category, count in report["by_category"].items():
+        print(f"  * {category:12s}: {count}")
+
+
+def handle_search_tickets(tickets: List[Dict[str, Any]]) -> None:
+    """Search ticket titles and optionally filter by category, status, and priority."""
+    from campusflow.search import (
+        ALLOWED_CATEGORIES,
+        ALLOWED_PRIORITIES,
+        ALLOWED_STATUSES,
+        search_tickets,
+    )
+
+    print("\n--- Search and Filter Tickets ---")
+    title_query = input("Title contains (press Enter for any title): ").strip()
+
+    def choose_filter(label: str, choices: tuple) -> Optional[str]:
+        while True:
+            value = input(
+                f"{label} ({', '.join(choices)}) or Enter to skip: "
+            ).strip()
+            if not value:
+                return None
+
+            for choice in choices:
+                if value.casefold() == choice.casefold():
+                    return choice
+
+            print(f"Invalid {label.lower()}. Choose one of: {', '.join(choices)}.")
+
+    category = choose_filter("Category", ALLOWED_CATEGORIES)
+    status = choose_filter("Status", ALLOWED_STATUSES)
+    priority = choose_filter("Priority", ALLOWED_PRIORITIES)
+
+    results = search_tickets(
+        tickets,
+        title_query=title_query,
+        category=category,
+        status=status,
+        priority=priority,
+    )
+
+    if not results:
+        print("No tickets matched your search and filters.")
+        return
+
+    for ticket in results:
+        display_ticket_summary(ticket)
+
+    print(f"\nMatching tickets: {len(results)}")
+
+
+
+
+
+def handle_view_notes(tickets: List[Dict[str, Any]]) -> None:
+    """Display a ticket's follow-up notes."""
+    ticket_id = input("Ticket ID: ").strip()
+    notes = get_ticket_notes(tickets, ticket_id)
+
+    if not notes:
+        print(f"No follow-up notes for ticket {ticket_id.strip().upper()}.")
+        return
+
+    print(f"\nFollow-up notes for {ticket_id.strip().upper()}:")
+    for note in notes:
+        print(f"[{note['note_id']}] {note['author']}: {note['message']}")
+
+
+def handle_add_note(tickets: List[Dict[str, Any]], data_path: str) -> None:
+    """Prompt the user and add a structured follow-up note to an active ticket."""
+    print("\n--- Add Follow-up Note ---")
+    ticket_id = input("Enter ticket ID: ").strip()
+    author = input("Enter your name/role (Author): ").strip()
+    message = input("Enter follow-up message (5-300 characters): ").strip()
+    note = add_note(tickets, ticket_id, author, message)
+    save_tickets(tickets, data_path)
+    print(
+        f"\n[Success] Added Note '{note['note_id']}' by '{note['author']}' "
+        f"to Ticket {ticket_id.upper()}."
+    )
 
 
 def run_menu(tickets: List[Dict[str, Any]], data_path: str) -> None:
@@ -153,9 +251,13 @@ def run_menu(tickets: List[Dict[str, Any]], data_path: str) -> None:
 6. Reopen Resolved Ticket (F4)
 7. Open Tickets Awaiting Work (F5 Queue)
 8. Generate Summary Report (F6)
-9. Save and Exit (F7)
+9. Search and Filter Tickets
+10. Understanding Check
+11. Add Follow-up Note
+12. View Ticket Notes
+13. Save and Exit (F7)
 ======================================================
-Select an option (1-9): """
+Select an option (1-13): """
 
     while True:
         try:
@@ -176,12 +278,20 @@ Select an option (1-9): """
                 handle_work_queue(tickets)
             elif choice == "8":
                 handle_generate_report(tickets)
-            elif choice in {"9", "exit", "quit", "q"}:
+            elif choice == "9":
+                handle_search_tickets(tickets)
+            elif choice == "10":
+                run_understanding_check()
+            elif choice == "11":
+                handle_add_note(tickets, data_path)
+            elif choice == "12":
+                handle_view_notes(tickets)
+            elif choice in {"13", "exit", "quit", "q"}:
                 save_tickets(tickets, data_path)
                 print("\n[CampusFlow] Tickets saved successfully. Goodbye!\n")
                 break
             else:
-                print(f"\n[Warning] Invalid option '{choice}'. Please select a number between 1 and 9.")
+                print(f"\n[Warning] Invalid option '{choice}'. Please select a number between 1 and 13.")
         except CampusFlowError as err:
             print(f"\n[Operation Failed] {err}")
         except (KeyboardInterrupt, EOFError):
@@ -202,8 +312,11 @@ def main() -> None:
         print(f"[CampusFlow] Loaded {len(tickets)} ticket(s) from '{data_path}'.")
     except StorageError as err:
         print(f"[CampusFlow Warning] {err}")
-        print("[CampusFlow] Starting with an empty in-memory collection to preserve existing data.")
-        tickets = []
+        print(
+            "[CampusFlow] Startup stopped to protect existing data. "
+            "Fix the storage file and restart."
+        )
+        return
 
     run_menu(tickets, data_path)
 
